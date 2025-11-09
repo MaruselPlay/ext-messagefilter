@@ -92,90 +92,39 @@ jobs:
     runs-on: windows-2022
     
     steps:
-      - name: Checkout extension code
+      - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v1.1
-      
-      - name: Setup Visual Studio environment
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup PHP with SDK
+        uses: shivammathur/setup-php@v2
         with:
-          arch: x64
+          php-version: '8.3'
+          extensions: none
+          tools: php-sdk-binary-tools
       
-      - name: Build everything in one go
+      - name: Build extension
         shell: cmd
         run: |
-          echo ===== Cloning PHP SDK =====
-          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk || exit /b 1
-          
-          echo ===== Entering PHP SDK directory =====
-          cd /d C:\php-sdk || exit /b 1
-          
-          echo ===== Initializing PHP SDK environment =====
-          call bin\phpsdk_setvars.bat || exit /b 1
-          
-          echo ===== Creating build tree =====
-          call phpsdk_buildtree phpdev || exit /b 1
-          
-          echo ===== Entering build tree =====
-          cd /d C:\php-sdk\phpdev\vs16\x64 || exit /b 1
-          
-          echo ===== Cloning PHP source =====
-          git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1 || exit /b 1
-          
-          echo ===== Entering PHP source =====
-          cd /d C:\php-sdk\phpdev\vs16\x64\php-src || exit /b 1
-          
-          echo ===== Downloading dependencies =====
-          call C:\php-sdk\bin\phpsdk_setvars.bat
-          call phpsdk_deps --update --branch 8.3 || exit /b 1
-          
-          echo ===== Copying extension files =====
-          xcopy /E /I /Y %GITHUB_WORKSPACE% ext\messagefilter || exit /b 1
-          
-          echo ===== Listing extension files =====
-          dir ext\messagefilter
-          
-          echo ===== Running buildconf =====
-          call buildconf --force || exit /b 1
-          
-          echo ===== Configuring =====
-          call configure --disable-all --enable-cli --enable-messagefilter --enable-zts || exit /b 1
-          
-          echo ===== Building =====
-          nmake || exit /b 1
-          
-          echo ===== Build complete! =====
-          dir x64\Release_TS\*.dll
-      
-      - name: Verify extension
-        shell: cmd
-        run: |
-          cd /d C:\php-sdk\phpdev\vs16\x64\php-src
-          if exist "x64\Release_TS\php_messagefilter.dll" (
-            echo Extension DLL found!
-            x64\Release_TS\php.exe -dextension=php_messagefilter.dll -m | findstr messagefilter
-            x64\Release_TS\php.exe -r "echo ZEND_THREAD_SAFE ? 'ZTS enabled' : 'ZTS disabled';"
-          ) else (
-            echo ERROR: Extension DLL not found
-            dir x64 /s
-            exit /b 1
-          )
+          phpize
+          configure --enable-messagefilter --enable-zts
+          nmake
       
       - name: Package
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path release
-          Copy-Item C:\php-sdk\phpdev\vs16\x64\php-src\x64\Release_TS\php_messagefilter.dll release\
-          Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
+          # Find the built DLL
+          $dll = Get-ChildItem -Recurse -Filter "php_messagefilter.dll" | Select-Object -First 1
+          if ($dll) {
+            New-Item -ItemType Directory -Force -Path release
+            Copy-Item $dll.FullName release\
+            Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
+          }
       
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: messagefilter-windows-zts
           path: messagefilter-windows-x64-zts.zip
-
 
 
   create-release:
