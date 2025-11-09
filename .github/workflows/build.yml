@@ -133,6 +133,8 @@ jobs:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    permissions:
+      contents: write
     
     steps:
       - name: Download Linux artifact
@@ -148,10 +150,57 @@ jobs:
           path: ./artifacts
       
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             ./artifacts/messagefilter-linux-x64-ts.tar.gz
             ./artifacts/messagefilter-windows-x64-ts.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  create-development-release:
+    name: Create Development Build Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      
+      - name: Delete previous development release
+        continue-on-error: true
+        run: |
+          gh release delete dev-latest --yes
+          git push origin :refs/tags/dev-latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create latest development release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-latest
+          name: "Latest Development Build"
+          body: |
+            ## Latest Development Build
+            
+            **Commit**: `${{ github.sha }}`
+            **Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+            
+            This release is automatically updated with every commit to main.
+          files: |
+            ./artifacts/messagefilter-linux-x64-ts/messagefilter-linux-x64-ts.tar.gz
+            ./artifacts/messagefilter-windows-x64-ts/messagefilter-windows-x64-ts.zip
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
