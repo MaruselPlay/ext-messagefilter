@@ -100,25 +100,16 @@ jobs:
         run: |
           git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
       
-      - name: Setup build tree
+      - name: Setup and build PHP
         shell: cmd
         run: |
           cd C:\php-sdk
           call bin\phpsdk_setvars.bat
           phpsdk_buildtree phpdev
-      
-      - name: Clone PHP source
-        shell: powershell
-        run: |
-          cd C:\php-sdk\phpdev\vs16\x64
+          cd phpdev\vs16\x64
           git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
-      
-      - name: Download PHP dependencies
-        shell: cmd
-        run: |
-          cd C:\php-sdk
-          call bin\phpsdk_setvars.bat
-          cd phpdev\vs16\x64\php-src
+          cd php-src
+          call C:\php-sdk\bin\phpsdk_setvars.bat
           phpsdk_deps --update --branch 8.3
       
       - name: Copy extension files
@@ -127,10 +118,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter"
           Copy-Item -Path "$env:GITHUB_WORKSPACE\*" -Destination "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter" -Recurse -Force
       
-      - name: Build PHP with extension (Thread Safe)
+      - name: Build extension
         shell: cmd
         run: |
-          call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call C:\php-sdk\bin\phpsdk_setvars.bat
           cd C:\php-sdk\phpdev\vs16\x64\php-src
           buildconf --force
           configure --disable-all --enable-cli --enable-messagefilter --enable-zts
@@ -156,6 +148,7 @@ jobs:
         with:
           name: messagefilter-windows-zts
           path: messagefilter-windows-x64-zts.zip
+
 
   create-release:
     name: Create GitHub Release
