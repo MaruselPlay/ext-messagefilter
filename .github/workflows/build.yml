@@ -170,37 +170,80 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
-      - name: Download artifacts
+      - name: Generate build version and date
+        id: build_info
+        run: |
+          # Get short commit hash
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          # Get commit count (build number)
+          BUILD_NUM=$(git rev-list --count HEAD)
+          
+          # Create version string
+          BUILD_VERSION="build-${BUILD_NUM}-${SHORT_SHA}"
+          
+          # Get current date in proper format
+          BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          
+          echo "version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
+          echo "date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "Build version: ${BUILD_VERSION}"
+          echo "Build date: ${BUILD_DATE}"
+      
+      - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
+          name: messagefilter-linux-x64-ts
           path: ./artifacts
       
-      - name: Delete previous development release
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: messagefilter-windows-x64-ts
+          path: ./artifacts
+      
+      - name: Generate release notes
+        run: |
+          cat > release_notes.md << EOF
+          ## Latest Development Build
+          
+          **Commit**: \`${{ github.sha }}\`
+          **Branch**: \`${{ github.ref_name }}\`
+          **Date**: ${{ steps.build_info.outputs.date }}
+          
+          ### Latest Changes
+          $(git log -1 --pretty=format:'- %s')
+          
+          ### Files
+          - \`messagefilter-linux-x64-ts.tar.gz\` - Linux x64 (Thread-Safe)
+          - \`messagefilter-windows-x64-ts.zip\` - Windows x64 (Thread-Safe)
+          
+          > ⚠️ This is an automated development build. For stable releases, see tagged versions.
+          
+          This release is automatically updated with every commit to main.
+          EOF
+      
+      - name: Delete old development release
         continue-on-error: true
         run: |
-          gh release delete dev-latest --yes
-          git push origin :refs/tags/dev-latest
+          gh release delete dev-latest --yes || true
+          git push origin :refs/tags/dev-latest || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Create latest development release
+      - name: Create Latest Development Build release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev-latest
           name: "Latest Development Build"
-          body: |
-            ## Latest Development Build
-            
-            **Commit**: `${{ github.sha }}`
-            **Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-            
-            This release is automatically updated with every commit to main.
+          body_path: release_notes.md
           files: |
-            ./artifacts/messagefilter-linux-x64-ts/messagefilter-linux-x64-ts.tar.gz
-            ./artifacts/messagefilter-windows-x64-ts/messagefilter-windows-x64-ts.zip
+            ./artifacts/messagefilter-linux-x64-ts.tar.gz
+            ./artifacts/messagefilter-windows-x64-ts.zip
           draft: false
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
