@@ -95,99 +95,87 @@ jobs:
       - name: Checkout extension code
         uses: actions/checkout@v4
       
-      - name: Setup and build everything
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+      
+      - name: Setup Visual Studio environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      
+      - name: Build everything in one go
         shell: cmd
         run: |
-          REM Initialize Visual Studio
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          echo ===== Cloning PHP SDK =====
+          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk || exit /b 1
           
-          REM Clone PHP SDK
-          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
-          cd C:\php-sdk
+          echo ===== Entering PHP SDK directory =====
+          cd /d C:\php-sdk || exit /b 1
           
-          REM Initialize PHP SDK
-          call bin\phpsdk_setvars.bat
+          echo ===== Initializing PHP SDK environment =====
+          call bin\phpsdk_setvars.bat || exit /b 1
           
-          REM Create build tree
-          phpsdk_buildtree phpdev
+          echo ===== Creating build tree =====
+          call phpsdk_buildtree phpdev || exit /b 1
           
-          REM Clone PHP source
-          cd phpdev\vs16\x64
-          git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
-          cd php-src
+          echo ===== Entering build tree =====
+          cd /d C:\php-sdk\phpdev\vs16\x64 || exit /b 1
           
-          REM Download dependencies
-          phpsdk_deps --update --branch 8.3
+          echo ===== Cloning PHP source =====
+          git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1 || exit /b 1
           
-          REM Copy extension files
-          xcopy /E /I /Y %GITHUB_WORKSPACE% ext\messagefilter
+          echo ===== Entering PHP source =====
+          cd /d C:\php-sdk\phpdev\vs16\x64\php-src || exit /b 1
           
-          REM Build
-          buildconf --force
-          configure --disable-all --enable-cli --enable-messagefilter --enable-zts
-          nmake
+          echo ===== Downloading dependencies =====
+          call C:\php-sdk\bin\phpsdk_setvars.bat
+          call phpsdk_deps --update --branch 8.3 || exit /b 1
+          
+          echo ===== Copying extension files =====
+          xcopy /E /I /Y %GITHUB_WORKSPACE% ext\messagefilter || exit /b 1
+          
+          echo ===== Listing extension files =====
+          dir ext\messagefilter
+          
+          echo ===== Running buildconf =====
+          call buildconf --force || exit /b 1
+          
+          echo ===== Configuring =====
+          call configure --disable-all --enable-cli --enable-messagefilter --enable-zts || exit /b 1
+          
+          echo ===== Building =====
+          nmake || exit /b 1
+          
+          echo ===== Build complete! =====
+          dir x64\Release_TS\*.dll
       
-      - name: Find built DLL
-        shell: powershell
-        run: |
-          Write-Host "Searching for php_messagefilter.dll..."
-          Get-ChildItem -Path C:\php-sdk -Recurse -Filter "php_messagefilter.dll" -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "Found: $($_.FullName)"
-          }
-          
-          Write-Host "`nSearching for messagefilter.dll..."
-          Get-ChildItem -Path C:\php-sdk -Recurse -Filter "messagefilter.dll" -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "Found: $($_.FullName)"
-          }
-          
-          Write-Host "`nListing x64 Release directories..."
-          if (Test-Path "C:\php-sdk\phpdev\vs16\x64\php-src\x64") {
-            Get-ChildItem -Path "C:\php-sdk\phpdev\vs16\x64\php-src\x64" -Directory
-          }
-      
-      - name: Verify extension (if found)
+      - name: Verify extension
         shell: cmd
         run: |
-          cd C:\php-sdk\phpdev\vs16\x64\php-src
-          
-          REM Check if DLL exists in expected location
+          cd /d C:\php-sdk\phpdev\vs16\x64\php-src
           if exist "x64\Release_TS\php_messagefilter.dll" (
-            echo DLL found in Release_TS
+            echo Extension DLL found!
             x64\Release_TS\php.exe -dextension=php_messagefilter.dll -m | findstr messagefilter
             x64\Release_TS\php.exe -r "echo ZEND_THREAD_SAFE ? 'ZTS enabled' : 'ZTS disabled';"
-          ) else if exist "x64\Release\php_messagefilter.dll" (
-            echo DLL found in Release (non-ZTS?)
-            x64\Release\php.exe -dextension=php_messagefilter.dll -m
           ) else (
-            echo ERROR: DLL not found!
-            echo Checking build output...
+            echo ERROR: Extension DLL not found
             dir x64 /s
             exit /b 1
           )
       
-      - name: Create release package
+      - name: Package
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path .\release
-          
-          # Try to find the DLL
-          $dll = Get-ChildItem -Path "C:\php-sdk\phpdev\vs16\x64\php-src\x64" -Recurse -Filter "php_messagefilter.dll" | Select-Object -First 1
-          
-          if ($dll) {
-            Write-Host "Packaging: $($dll.FullName)"
-            Copy-Item $dll.FullName .\release\
-            if (Test-Path README.md) { Copy-Item README.md .\release\ }
-            Compress-Archive -Path .\release\* -DestinationPath messagefilter-windows-x64-zts.zip
-          } else {
-            Write-Error "DLL not found - build may have failed"
-            exit 1
-          }
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item C:\php-sdk\phpdev\vs16\x64\php-src\x64\Release_TS\php_messagefilter.dll release\
+          Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
       
-      - name: Upload Windows artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: messagefilter-windows-zts
           path: messagefilter-windows-x64-zts.zip
+
 
 
   create-release:
