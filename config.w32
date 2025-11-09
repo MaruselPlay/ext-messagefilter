@@ -1,0 +1,5 @@
+ARG_ENABLE("messagefilter", "enable messagefilter support", "no");
+
+if (PHP_MESSAGEFILTER != "no") {
+    EXTENSION("messagefilter", "messagefilter.c");
+}

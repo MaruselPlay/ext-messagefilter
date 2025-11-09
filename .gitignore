@@ -1,0 +1,9 @@
+config.nice.bat
+configure.bat
+php-devel/
+php-bin/
+x64/
+test.php
+configure.js
+Makefile
+Makefile.objects
