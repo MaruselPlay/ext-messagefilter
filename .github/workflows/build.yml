@@ -89,57 +89,67 @@ jobs:
 
   build-windows:
     name: Build Windows (ZTS)
-    runs-on: windows-2022
+    runs-on: windows-2019
     
     steps:
       - name: Checkout extension code
         uses: actions/checkout@v4
       
-      - name: Setup PHP SDK
-        shell: cmd
+      - name: Clone PHP SDK
+        shell: powershell
         run: |
           git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
-          
-      - name: Download PHP 8.3 source
+      
+      - name: Setup build tree
         shell: cmd
         run: |
           cd C:\php-sdk
+          call bin\phpsdk_setvars.bat
+          phpsdk_buildtree phpdev
+      
+      - name: Clone PHP source
+        shell: powershell
+        run: |
+          cd C:\php-sdk\phpdev\vs16\x64
           git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
       
-      - name: Setup build environment
+      - name: Download PHP dependencies
         shell: cmd
         run: |
           cd C:\php-sdk
-          phpsdk-vs16-x64.bat -t C:\php-sdk\php-src
+          call bin\phpsdk_setvars.bat
+          cd phpdev\vs16\x64\php-src
+          phpsdk_deps --update --branch 8.3
       
-      - name: Copy extension to PHP source
-        shell: cmd
+      - name: Copy extension files
+        shell: powershell
         run: |
-          xcopy /E /I /Y %GITHUB_WORKSPACE% C:\php-sdk\php-src\ext\messagefilter
+          New-Item -ItemType Directory -Force -Path "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter"
+          Copy-Item -Path "$env:GITHUB_WORKSPACE\*" -Destination "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter" -Recurse -Force
       
       - name: Build PHP with extension (Thread Safe)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cd C:\php-sdk\php-src
-          buildconf
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd C:\php-sdk\phpdev\vs16\x64\php-src
+          buildconf --force
           configure --disable-all --enable-cli --enable-messagefilter --enable-zts
           nmake
       
       - name: Verify extension
         shell: cmd
         run: |
-          cd C:\php-sdk\php-src
+          cd C:\php-sdk\phpdev\vs16\x64\php-src
           x64\Release_TS\php.exe -d extension=php_messagefilter.dll -m | findstr messagefilter
           x64\Release_TS\php.exe -r "echo ZEND_THREAD_SAFE ? 'ZTS enabled' : 'ZTS disabled';"
       
       - name: Create release package
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path release
-          Copy-Item C:\php-sdk\php-src\x64\Release_TS\php_messagefilter.dll release\
-          Copy-Item README.md release\ -ErrorAction SilentlyContinue
-          Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
+          New-Item -ItemType Directory -Force -Path .\release
+          Copy-Item "C:\php-sdk\phpdev\vs16\x64\php-src\x64\Release_TS\php_messagefilter.dll" .\release\
+          if (Test-Path README.md) { Copy-Item README.md .\release\ }
+          Compress-Archive -Path .\release\* -DestinationPath messagefilter-windows-x64-zts.zip
       
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
