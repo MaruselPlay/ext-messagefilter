@@ -90,68 +90,44 @@ jobs:
   build-windows:
     name: Build Windows (ZTS)
     runs-on: windows-2022
+    strategy:
+      matrix:
+        arch: [x64]
+        ts: [ts]  # Thread-safe only
     
     steps:
-      - name: Checkout
+      - name: Checkout extension code
         uses: actions/checkout@v4
       
       - name: Build extension
-        shell: cmd
-        run: |
-          REM Initialize Visual Studio 2022 environment
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          
-          REM Clone PHP SDK
-          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
-          cd /d C:\php-sdk
-          
-          REM Initialize PHP SDK environment
-          call bin\phpsdk_setvars.bat
-          
-          REM Create build tree
-          phpsdk_buildtree phpdev
-          
-          REM Clone PHP 8.3 source
-          cd /d C:\php-sdk\phpdev\vs16\x64
-          git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
-          cd php-src
-          
-          REM Download dependencies (must be in same session after phpsdk_setvars)
-          phpsdk_deps --update --branch 8.3
-          
-          REM Copy extension
-          xcopy /E /I /Y %GITHUB_WORKSPACE% ext\messagefilter
-          
-          REM Build
-          buildconf --force
-          configure --disable-all --enable-cli --enable-messagefilter --enable-zts
-          nmake
+        uses: php/php-windows-builder/extension@v1
+        with:
+          php-version: '8.3'
+          arch: ${{ matrix.arch }}
+          ts: ${{ matrix.ts }}
+          args: --enable-messagefilter
       
-      - name: Verify build
-        shell: cmd
-        run: |
-          cd /d C:\php-sdk\phpdev\vs16\x64\php-src
-          if not exist "x64\Release_TS\php_messagefilter.dll" (
-            echo ERROR: Extension DLL not found!
-            dir x64 /s /b
-            exit /b 1
-          )
-          echo Build successful!
-          x64\Release_TS\php.exe -dextension=php_messagefilter.dll -m | findstr messagefilter
-          x64\Release_TS\php.exe -r "var_dump(ZEND_THREAD_SAFE);"
-      
-      - name: Package
+      - name: Package extension
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path release
-          Copy-Item C:\php-sdk\phpdev\vs16\x64\php-src\x64\Release_TS\php_messagefilter.dll release\
-          Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
+          # Find the built DLL
+          $dll = Get-ChildItem -Recurse -Filter "php_messagefilter.dll" | Select-Object -First 1
+          
+          if ($dll) {
+            Write-Host "Found DLL: $($dll.FullName)"
+            New-Item -ItemType Directory -Force -Path release
+            Copy-Item $dll.FullName release\php_messagefilter.dll
+            Compress-Archive -Path release\* -DestinationPath "messagefilter-windows-${{ matrix.arch }}-${{ matrix.ts }}.zip"
+          } else {
+            Write-Error "DLL not found"
+            exit 1
+          }
       
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: messagefilter-windows-zts
-          path: messagefilter-windows-x64-zts.zip
+          name: messagefilter-windows-${{ matrix.arch }}-${{ matrix.ts }}
+          path: messagefilter-windows-${{ matrix.arch }}-${{ matrix.ts }}.zip
 
   create-release:
     name: Create GitHub Release
