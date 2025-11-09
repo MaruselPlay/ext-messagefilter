@@ -95,35 +95,34 @@ jobs:
       - name: Checkout extension code
         uses: actions/checkout@v4
       
-      - name: Clone PHP SDK
-        shell: powershell
-        run: |
-          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
-      
-      - name: Setup and build PHP
+      - name: Setup complete build environment and compile
         shell: cmd
         run: |
+          REM Initialize Visual Studio environment FIRST
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          
+          REM Clone PHP SDK
+          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
           cd C:\php-sdk
+          
+          REM Initialize PHP SDK
           call bin\phpsdk_setvars.bat
+          
+          REM Create build tree
           phpsdk_buildtree phpdev
+          
+          REM Clone PHP source
           cd phpdev\vs16\x64
           git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
           cd php-src
-          call C:\php-sdk\bin\phpsdk_setvars.bat
+          
+          REM Download dependencies
           phpsdk_deps --update --branch 8.3
-      
-      - name: Copy extension files
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter"
-          Copy-Item -Path "$env:GITHUB_WORKSPACE\*" -Destination "C:\php-sdk\phpdev\vs16\x64\php-src\ext\messagefilter" -Recurse -Force
-      
-      - name: Build extension
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          call C:\php-sdk\bin\phpsdk_setvars.bat
-          cd C:\php-sdk\phpdev\vs16\x64\php-src
+          
+          REM Copy extension
+          xcopy /E /I /Y %GITHUB_WORKSPACE% ext\messagefilter
+          
+          REM Build
           buildconf --force
           configure --disable-all --enable-cli --enable-messagefilter --enable-zts
           nmake
@@ -132,7 +131,7 @@ jobs:
         shell: cmd
         run: |
           cd C:\php-sdk\phpdev\vs16\x64\php-src
-          x64\Release_TS\php.exe -d extension=php_messagefilter.dll -m | findstr messagefilter
+          x64\Release_TS\php.exe -dextension=php_messagefilter.dll -m | findstr messagefilter
           x64\Release_TS\php.exe -r "echo ZEND_THREAD_SAFE ? 'ZTS enabled' : 'ZTS disabled';"
       
       - name: Create release package
