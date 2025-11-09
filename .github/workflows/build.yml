@@ -1,0 +1,176 @@
+name: Build MessageFilter Extension
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  release:
+    types: [ created ]
+
+jobs:
+  build-linux:
+    name: Build Linux (ZTS)
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout extension code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            bison \
+            re2c \
+            pkg-config \
+            libxml2-dev \
+            libsqlite3-dev \
+            libssl-dev \
+            libcurl4-openssl-dev \
+            libonig-dev \
+            libzip-dev \
+            libreadline-dev \
+            zlib1g-dev
+      
+      - name: Download PHP 8.3 source
+        run: |
+          cd /tmp
+          wget https://www.php.net/distributions/php-8.3.14.tar.gz
+          tar -xzf php-8.3.14.tar.gz
+          cd php-8.3.14
+          
+      - name: Compile PHP 8.3 with ZTS
+        run: |
+          cd /tmp/php-8.3.14
+          ./configure \
+            --enable-zts \
+            --prefix=/opt/php83-zts \
+            --with-config-file-path=/opt/php83-zts/etc \
+            --enable-mbstring \
+            --with-curl \
+            --with-openssl \
+            --with-zlib \
+            --disable-cgi
+          make -j$(nproc)
+          sudo make install
+      
+      - name: Build MessageFilter extension
+        run: |
+          /opt/php83-zts/bin/phpize
+          ./configure --with-php-config=/opt/php83-zts/bin/php-config
+          make
+          make test || true
+      
+      - name: Verify extension
+        run: |
+          EXT_DIR=$(/opt/php83-zts/bin/php-config --extension-dir)
+          sudo cp modules/messagefilter.so $EXT_DIR/
+          /opt/php83-zts/bin/php -d extension=messagefilter.so -m | grep messagefilter
+          /opt/php83-zts/bin/php -d extension=messagefilter.so -r "echo 'ZTS: ' . (ZEND_THREAD_SAFE ? 'enabled' : 'disabled') . PHP_EOL;"
+      
+      - name: Create release package
+        run: |
+          mkdir -p release
+          cp modules/messagefilter.so release/
+          cp README.md release/ || touch release/README.md
+          cd release
+          tar -czf messagefilter-linux-x64-zts.tar.gz messagefilter.so README.md
+      
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: messagefilter-linux-zts
+          path: release/messagefilter-linux-x64-zts.tar.gz
+
+  build-windows:
+    name: Build Windows (ZTS)
+    runs-on: windows-2022
+    
+    steps:
+      - name: Checkout extension code
+        uses: actions/checkout@v4
+      
+      - name: Setup PHP SDK
+        shell: cmd
+        run: |
+          git clone https://github.com/php/php-sdk-binary-tools.git C:\php-sdk
+          
+      - name: Download PHP 8.3 source
+        shell: cmd
+        run: |
+          cd C:\php-sdk
+          git clone https://github.com/php/php-src.git --branch=PHP-8.3 --depth=1
+      
+      - name: Setup build environment
+        shell: cmd
+        run: |
+          cd C:\php-sdk
+          phpsdk-vs16-x64.bat -t C:\php-sdk\php-src
+      
+      - name: Copy extension to PHP source
+        shell: cmd
+        run: |
+          xcopy /E /I /Y %GITHUB_WORKSPACE% C:\php-sdk\php-src\ext\messagefilter
+      
+      - name: Build PHP with extension (Thread Safe)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd C:\php-sdk\php-src
+          buildconf
+          configure --disable-all --enable-cli --enable-messagefilter --enable-zts
+          nmake
+      
+      - name: Verify extension
+        shell: cmd
+        run: |
+          cd C:\php-sdk\php-src
+          x64\Release_TS\php.exe -d extension=php_messagefilter.dll -m | findstr messagefilter
+          x64\Release_TS\php.exe -r "echo ZEND_THREAD_SAFE ? 'ZTS enabled' : 'ZTS disabled';"
+      
+      - name: Create release package
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item C:\php-sdk\php-src\x64\Release_TS\php_messagefilter.dll release\
+          Copy-Item README.md release\ -ErrorAction SilentlyContinue
+          Compress-Archive -Path release\* -DestinationPath messagefilter-windows-x64-zts.zip
+      
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: messagefilter-windows-zts
+          path: messagefilter-windows-x64-zts.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: messagefilter-linux-zts
+          path: ./artifacts
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: messagefilter-windows-zts
+          path: ./artifacts
+      
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./artifacts/messagefilter-linux-x64-zts.tar.gz
+            ./artifacts/messagefilter-windows-x64-zts.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
