@@ -89,7 +89,7 @@ jobs:
 
   build-windows:
     name: Build Windows (ZTS)
-    runs-on: windows-2019
+    runs-on: windows-2022
     
     steps:
       - name: Checkout extension code
@@ -130,7 +130,7 @@ jobs:
       - name: Build PHP with extension (Thread Safe)
         shell: cmd
         run: |
-          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           cd C:\php-sdk\phpdev\vs16\x64\php-src
           buildconf --force
           configure --disable-all --enable-cli --enable-messagefilter --enable-zts
