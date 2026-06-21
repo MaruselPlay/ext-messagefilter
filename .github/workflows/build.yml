@@ -10,8 +10,18 @@ on:
 
 jobs:
   build-linux:
-    name: Build Linux (ZTS)
+    name: Build Linux (ZTS) - PHP ${{ matrix.php }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.3'
+            patch: '8.3.24'
+          - php: '8.4'
+            patch: '8.4.14'
+          - php: '8.5'
+            patch: '8.5.7'
     
     steps:
       - name: Checkout extension code
@@ -37,20 +47,19 @@ jobs:
             libreadline-dev \
             zlib1g-dev
       
-      - name: Download PHP 8.3 source
+      - name: Download PHP ${{ matrix.patch }} source
         run: |
           cd /tmp
-          wget https://www.php.net/distributions/php-8.3.14.tar.gz
-          tar -xzf php-8.3.14.tar.gz
-          cd php-8.3.14
+          wget https://www.php.net/distributions/php-${{ matrix.patch }}.tar.gz
+          tar -xzf php-${{ matrix.patch }}.tar.gz
           
-      - name: Compile PHP 8.3 with ZTS
+      - name: Compile PHP ${{ matrix.patch }} with ZTS
         run: |
-          cd /tmp/php-8.3.14
+          cd /tmp/php-${{ matrix.patch }}
           ./configure \
             --enable-zts \
-            --prefix=/opt/php83-zts \
-            --with-config-file-path=/opt/php83-zts/etc \
+            --prefix=/opt/php-zts \
+            --with-config-file-path=/opt/php-zts/etc \
             --enable-mbstring \
             --with-curl \
             --with-openssl \
@@ -61,17 +70,17 @@ jobs:
       
       - name: Build MessageFilter extension
         run: |
-          /opt/php83-zts/bin/phpize
-          ./configure --with-php-config=/opt/php83-zts/bin/php-config
+          /opt/php-zts/bin/phpize
+          ./configure --with-php-config=/opt/php-zts/bin/php-config
           make
           make test || true
       
       - name: Verify extension
         run: |
-          EXT_DIR=$(/opt/php83-zts/bin/php-config --extension-dir)
+          EXT_DIR=$(/opt/php-zts/bin/php-config --extension-dir)
           sudo cp modules/messagefilter.so $EXT_DIR/
-          /opt/php83-zts/bin/php -d extension=messagefilter.so -m | grep messagefilter
-          /opt/php83-zts/bin/php -d extension=messagefilter.so -r "echo 'ZTS: ' . (ZEND_THREAD_SAFE ? 'enabled' : 'disabled') . PHP_EOL;"
+          /opt/php-zts/bin/php -d extension=messagefilter.so -m | grep messagefilter
+          /opt/php-zts/bin/php -d extension=messagefilter.so -r "echo 'ZTS: ' . (ZEND_THREAD_SAFE ? 'enabled' : 'disabled') . PHP_EOL;"
       
       - name: Create release package
         run: |
@@ -79,19 +88,21 @@ jobs:
           cp modules/messagefilter.so release/
           cp README.md release/ || touch release/README.md
           cd release
-          tar -czf messagefilter-linux-x64-ts.tar.gz messagefilter.so README.md
+          tar -czf messagefilter-php${{ matrix.php }}-linux-x64-ts.tar.gz messagefilter.so README.md
       
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: messagefilter-linux-x64-ts
-          path: release/messagefilter-linux-x64-ts.tar.gz
+          name: messagefilter-php${{ matrix.php }}-linux-x64-ts
+          path: release/messagefilter-php${{ matrix.php }}-linux-x64-ts.tar.gz
 
   build-windows:
-    name: Build Windows (ZTS)
+    name: Build Windows (ZTS) - PHP ${{ matrix.php }}
     runs-on: windows-2022
     strategy:
+      fail-fast: false
       matrix:
+        php: ['8.3', '8.4', '8.5']
         arch: [x64]
         ts: [ts]
     
@@ -102,7 +113,7 @@ jobs:
       - name: Build extension
         uses: php/php-windows-builder/extension@v1
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           args: --enable-messagefilter
@@ -116,7 +127,7 @@ jobs:
             Write-Host "Found DLL: $($dll.FullName)"
             New-Item -ItemType Directory -Force -Path release
             Copy-Item $dll.FullName release\php_messagefilter.dll
-            Compress-Archive -Path release\* -DestinationPath "messagefilter-windows-x64-ts.zip"
+            Compress-Archive -Path release\* -DestinationPath "messagefilter-php${{ matrix.php }}-windows-x64-ts.zip"
           } else {
             Write-Error "DLL not found"
             exit 1
@@ -125,8 +136,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: messagefilter-windows-x64-ts
-          path: messagefilter-windows-x64-ts.zip
+          name: messagefilter-php${{ matrix.php }}-windows-x64-ts
+          path: messagefilter-php${{ matrix.php }}-windows-x64-ts.zip
 
   create-release:
     name: Create GitHub Release
@@ -137,33 +148,25 @@ jobs:
       contents: write
     
     steps:
-      - name: Download Linux artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: messagefilter-linux-x64-ts
           path: ./artifacts
-      
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: messagefilter-windows-x64-ts
-          path: ./artifacts
+          pattern: messagefilter-*
+          merge-multiple: true
       
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ./artifacts/messagefilter-linux-x64-ts.tar.gz
-            ./artifacts/messagefilter-windows-x64-ts.zip
+          files: ./artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
   create-development-release:
     name: Create Development Build Release
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
     permissions:
       contents: write
     
@@ -176,34 +179,20 @@ jobs:
       - name: Generate build version and date
         id: build_info
         run: |
-          # Get short commit hash
           SHORT_SHA=$(git rev-parse --short HEAD)
-          
-          # Get commit count (build number)
           BUILD_NUM=$(git rev-list --count HEAD)
-          
-          # Create version string
           BUILD_VERSION="build-${BUILD_NUM}-${SHORT_SHA}"
-          
-          # Get current date in proper format
           BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           
           echo "version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
           echo "date=${BUILD_DATE}" >> $GITHUB_OUTPUT
-          echo "Build version: ${BUILD_VERSION}"
-          echo "Build date: ${BUILD_DATE}"
       
-      - name: Download Linux artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: messagefilter-linux-x64-ts
           path: ./artifacts
-      
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: messagefilter-windows-x64-ts
-          path: ./artifacts
+          pattern: messagefilter-*
+          merge-multiple: true
       
       - name: Generate release notes
         run: |
@@ -217,13 +206,13 @@ jobs:
           ### Latest Changes
           $(git log -1 --pretty=format:'- %s')
           
-          ### Files
-          - \`messagefilter-linux-x64-ts.tar.gz\` - Linux x64 (Thread-Safe)
-          - \`messagefilter-windows-x64-ts.zip\` - Windows x64 (Thread-Safe)
+          ### Files Available
+          - \`messagefilter-php8.X-linux-x64-ts.tar.gz\` - Linux x64 (Thread-Safe)
+          - \`messagefilter-php8.X-windows-x64-ts.zip\` - Windows x64 (Thread-Safe)
           
           > ⚠️ This is an automated development build. For stable releases, see tagged versions.
           
-          This release is automatically updated with every commit to main.
+          This release is automatically updated with every commit to active branches.
           EOF
       
       - name: Delete old development release
@@ -240,9 +229,7 @@ jobs:
           tag_name: dev-latest
           name: "Latest Development Build"
           body_path: release_notes.md
-          files: |
-            ./artifacts/messagefilter-linux-x64-ts.tar.gz
-            ./artifacts/messagefilter-windows-x64-ts.zip
+          files: ./artifacts/*
           draft: false
           prerelease: true
         env:
