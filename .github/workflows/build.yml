@@ -78,6 +78,7 @@ jobs:
       - name: Verify extension
         run: |
           EXT_DIR=$(/opt/php-zts/bin/php-config --extension-dir)
+          sudo mkdir -p $EXT_DIR
           sudo cp modules/messagefilter.so $EXT_DIR/
           /opt/php-zts/bin/php -d extension=messagefilter.so -m | grep messagefilter
           /opt/php-zts/bin/php -d extension=messagefilter.so -r "echo 'ZTS: ' . (ZEND_THREAD_SAFE ? 'enabled' : 'disabled') . PHP_EOL;"
